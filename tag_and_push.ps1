@@ -1,8 +1,8 @@
-$VER = "v3.04.005"
+$VER = "v2.01"
 $DATE = "Date: {0}" -f (Get-Date)
 
 $COMMENT = @"
-* Fixed: added back changelog
+* New: A functional workflow assembling PCR product/Amplicon for BRF
 "@
 
 Move-Item -Path "changelog.txt" -Destination "changelog_old.txt"

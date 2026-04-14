@@ -1,3 +1,7 @@
+v2.01
+Date: 14/04/2026 3:55:57 PM
+* New: A functional workflow assembling PCR product/Amplicon for BRF
+
 v3.04.005
 Date: 31/03/2026 2:39:06 PM
 * Fixed: added back changelog
