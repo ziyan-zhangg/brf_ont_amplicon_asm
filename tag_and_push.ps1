@@ -13,10 +13,10 @@ Add-Content -Path "changelog.txt" -Value ""
 Get-Content -Path "changelog_old.txt" | Add-Content -Path "changelog.txt"
 Remove-Item -Path "changelog_old.txt"
 
-git add -u
+git add .                        # Changed from -u to catch new files too
 $MSG = $COMMENT
 git commit -m $MSG
 git tag -a $VER -m $MSG
 
-git push
-git push origin $VER
+git push -u origin main          # -u sets upstream tracking on first push
+git push origin $VER             # Push the tag
