@@ -1,134 +1,188 @@
-## BRF ONT Plasmid Assembly
-Version 3.04.001
-Prepares a PromethION plasmid sequencing run for processing by the ONT 
-Epi2me-labs wf-clone-validation pipeline using v1.8.4
+# ONT Amplicon Assembly Pipeline on Gadi
 
-Replaces the original Simple Plasmid Pipeline by John Luo here: https://github.com/RunpengLuo/Simple_Plasmid
+This toolkit prepares and submits ONT amplicon assembly jobs on the NCI Gadi HPC system using the [epi2me-labs/wf-amplicon](https://github.com/epi2me-labs/wf-amplicon) Nextflow pipeline.
 
-There are two ways of running this pipeline.
-1) Gadi cluster launch scripts using setup_plasmids.qsub
-2) Local run scripts using plasmid_prep.py
+---
 
-Both require a PromethION sequencing directory, a plasmid sample sheet
-from user, and an output path to build a new directory tree for downstream processing.
+## Files
 
-It then creates the directory tree structure expected by the wf-clone-validation
-pipeline, and populates it with the appropriate files from the PromethION.
-It also creates all the scripts to run each given client, collapses
-multiple fastqs to a single file for each sample (you can disable this), filters
-by sequence length and quality, runs the pipeline, and maps back
-the reads against the assembled plasmid sequence.
+| File | Description |
+|---|---|
+| `amplicon_prep_gadi.py` | Main Python script that generates all PBS job scripts and directory structure |
+| `amplicon_setup.qsub` | PBS launcher script that runs `amplicon_prep_gadi.py` on Gadi |
 
-You may provide custom reference sequences for each barcode in the
-plasmid sample sheet (details below).
- 
-There is one report generated per client.
+---
 
-### Download and Setup
-This pipeline requires a 64-bit Linux system and python (supported versions are python3.12 and higher).
+## Prerequisites
 
-Download the pipeline via Git:
+### One-time setup (login node only)
+
+These steps only need to be done once. Gadi compute nodes have no internet access, so all tools and containers must be pre-cached.
+
+**1. Install Nextflow binary**
 ```bash
-git clone https://github.com/cameron-jack/brf_ont_plasmid_asm.git
+module load java/jdk-17.0.2
+cd /g/data/vz35/amplicon_gadi
+curl https://get.nextflow.io | bash
 ```
 
-External dependencies:
-* minimap2
-* samtools
-* Nanofilt (deprecated and to be replaced with Chopper - requires Ubuntu 20 or later)
-* Chopper (https://github.com/wdecoster/chopper)
-* Nextflow
-* Singularity - temporary directories for cache and tmp are required to be linked from the scripts
+**2. Set environment and pull the pipeline**
+```bash
+module load java/jdk-17.0.2
+export PATH=/g/data/vz35/amplicon_gadi:$PATH
+export NXF_HOME=/g/data/vz35/amplicon_gadi
+export NXF_VER=23.10.1
+export NXF_DISABLE_CHECK_LATEST=true
+export SINGULARITY_CACHEDIR=/g/data/vz35/amplicon_gadi/singularity_cache
+export NXF_SINGULARITY_CACHEDIR=$SINGULARITY_CACHEDIR
 
-Each tool can have custom paths provided via command line arguments.
+nextflow pull epi2me-labs/wf-amplicon -r v1.2.2
+```
 
-### Running the prep
-You must create a CSV (Comma Separated Value) file describing the client,sample_name, barcode, size, and the path to a reference file (if available). 
+**3. Pre-pull Singularity containers**
 
-E.g. note that the names given are ficticious and you should use your actual client names. Also, if you leave spaces in client names, the pipeline will automatically change these to underscores _
+Run the pipeline once on the login node (it will fail due to memory limits but will cache the containers):
+```bash
+module load singularity
+nextflow run epi2me-labs/wf-amplicon -r v1.2.2 \
+  --fastq <your_fastq_dir> \
+  --out_dir <output_dir> \
+  --sample_sheet <sample_sheet.csv> \
+  -profile singularity
+```
 
-$ cat sample_spreadsheet.csv 
+Any containers not pulled automatically can be pulled manually:
+```bash
+singularity pull \
+  --name ontresearch-medaka-sha<hash>.img \
+  docker://ontresearch/medaka:sha<hash>
 
-client,alias,barcode,size,reference
-A_Person,pEG11,barcode01,12302,
-B_Researcher,11_2,barcode02,11456,
-B_Researcher,11_4,barcode03,11456,
-C_Labhead,P19-3,barcode04,13135,
-C_Labhead,P19-4,barcode05,13135,
-D_Student,D1,barcode09,9985,/g/data/vz35/PromethION_data/sequencer_uploads/ONT_PlasmidSeq_20260225/D1.fasta
-D_Student,D2,barcode10,10217,/g/data/vz35/PromethION_data/sequencer_uploads/ONT_PlasmidSeq_20260225/D2.fasta
-D_Student,D3,barcode11,10270,/g/data/vz35/PromethION_data/sequencer_uploads/ONT_PlasmidSeq_20260225/D3.fasta
+# Move to cache directory
+mv ontresearch-medaka-sha<hash>.img /g/data/vz35/amplicon_gadi/singularity_cache/
+```
 
-### Output of prep
-The prep stage will create a new directory structure that looks like this:
+---
 
-- plasmid_dir/
-  - clientA/
-    - fastq1...fastqN (.gz possible)
-    - reference/ref_filename.fa (optional)
-    - insert/insert_filename.fa (optional)
-  - clientB/
-    - ...
-  - ...
+## Input: Sample Sheet
 
-This is required for the ONT pipelines to run.
+A CSV file with 3 or 4 columns (reference is optional):
 
-# On Gadi
+```
+client,alias,barcode,reference
+Sarah_Kaines,SK48,barcode44,
+Sarah_Kaines,SK49,barcode45,
+AnotherClient,AC01,barcode01,/path/to/reference.fa
+```
 
-Edit the file setup_plasmids.qsub. It contains a section that looks like this:
+| Column | Description |
+|---|---|
+| `client` | Client/project name — sets the output directory name |
+| `alias` | Sample alias used in output filenames (e.g. SK48) |
+| `barcode` | Barcode directory name in the PromethION data |
+| `reference` | Optional path to a reference FASTA file |
 
-### Set these variables and launch with qsub ###
+Samples with a reference and samples without are handled separately — two sample sheets are generated automatically.
 
-# EMAIL is your email address to get Gadi job messages
-EMAIL="brf.staff.name@anu.edu.au"
+---
 
-# PROMDATA is the path to the PromethION run containing the plasmids
-PROMDATA="../PromethION_data/sequencer_uploads/ONT_PlasmidSeq_20260225/Plasmid_pool_relocated/20260225_1600_2B_PBK21844_1a3b8bcb"
+## Usage
 
-# PLASDIR is the name of the directory you want to put the plasmid assemblies in
-PLASDIR="plastest2"
+### Step 1: Edit the launcher script
 
-# SAMPLESHEET is the path to the sample sheet that describes the plasmid samples, users, plasmid length, and any reference. You make this file!
-SAMPLESHEET="../PromethION_data/sequencer_uploads/ONT_PlasmidSeq_20260225/plasmid_samplesheet_20260225.csv"
+Open `amplicon_setup.qsub` and set the variables at the top:
 
-You should replace the quoted sections with names and paths that are appropriate for your run. PLASDIR is where your prepared pipeline files will end up.
+```bash
+Email="your.email@anu.edu.au"
+PromData="ONT_PlasmidSeq_20260218/plasmidpool/20260218_1629_3F_PBE83525_e4822fd3"
+AmpDir="amplicon_run_20260218"
+SampleSheet="ONT_PlasmidSeq_20260218/plasmid_samplesheet_20260218.csv"
+```
 
-Save your changes and the launch it to Gadi. This will run the plasmid_prep_gadi.py script for you. Launch it with: qsub ./setup_plasmids.qsub
+### Step 2: Submit the launcher
 
-# Local prep
+```bash
+cd /path/to/your/working/directory
+qsub amplicon_setup.qsub
+```
 
-Run plasmid_prep.py with command line arguments for the existing ONT data source, 
-the output directory, and any other parameters as required. This will produce a new
-directory tree that is populated with the files and structure expected by the ONT
-wf-clone-validation pipeline. Pre-assembly filtering of reads is done by default with Nanofilt and passes on quality 15 and the expected size band +/- 2KB
-by adjusting the run scripts that are produced for each client.
+This runs `amplicon_prep_gadi.py` which will:
+1. Scan the PromethION directory for the barcodes listed in the sample sheet
+2. Create a structured output directory under `AmpDir/`
+3. Collapse all FASTQ files per barcode into a single `.fq.gz` file
+4. Generate per-client sample sheets (with and without reference)
+5. Generate per-client PBS job scripts (`run_<client>.qsub`)
+6. Generate a top-level launcher script (`run_amplicons.sh`)
 
+### Step 3: Submit the assembly jobs
 
-### Running the plasmid assembly
+```bash
+cd <AmpDir>
+./run_amplicons.sh
+```
 
-After the new directory structure has been created, you need to run the actual pipeline which will:
-1) trim the reads to +/- 2KB of the expected plasmid size
-2) Assemble the plasmid using Canu (we get better results with this than with Flye)
-3) Map the reads back to the assembled plasmid
+This submits a PBS job for each client.
 
-# On Gadi
-Change directory (cd) into the directory defined in your setup_plasmids.qsub script by $PLASDIR. Launch all of your client processing jobs by running:
-./run_plasmids.sh
+---
 
-This will launch each client's samples to the cluster as a separate job. Alternatively, you can launch individual client jobs e.g.
-qsub ./run_A_user.qsub
+## Output Directory Structure
 
-# Running locally
+```
+AmpDir/
+├── run_amplicons.sh               # Top-level launcher — runs all client jobs
+├── ClientA_sample_sheet_noref.csv
+├── ClientA_sample_sheet_ref.csv
+├── run_ClientA.qsub               # PBS job script for ClientA
+├── ClientA/
+│   ├── barcode01/
+│   │   └── barcode01.fq.gz        # Collapsed FASTQ
+│   ├── barcode02/
+│   │   ├── barcode02.fq.gz
+│   │   └── reference/
+│   │       └── reference.fa
+│   └── output/                    # wf-amplicon results
+│       ├── SK48.final.fasta
+│       └── SK49.final.fasta
+└── ClientB/
+    └── ...
+```
 
-To perform the actual pipeline, ensure that the whole output directory tree is available 
-to the machine that will run the pipeline. Then you can simply execute the bash script
-"run_plasmids.sh" in the top-level directory. This will execute each client pipeline sequentially.
+---
 
-### Outputs
+## Advanced Options
 
-The final outputs of the main ONT Plasmid Assembly pipeline will be in the client directory under /outputs/. There are many files here related to various stages of the pipeline.
-In each barcode directory there will also be a BAM file, mapping the filtered reads back to the final assembly. This can be helpful for anyone wishing to check on the validity of the final assembly.
+These can be passed to `amplicon_prep_gadi.py` directly or added to `amplicon_setup.qsub`:
 
+| Option | Default | Description |
+|---|---|---|
+| `--pipeline_version` | `v1.2.2` | wf-amplicon version to use |
+| `--basecaller_cfg` | None | Override basecaller e.g. `dna_r10.4.1_e8.2_400bps_sup@v5.0.0` |
+| `--no_collapse` | False | Disable collapsing FASTQs into a single file per barcode |
+| `--overwrite` | False | Overwrite existing output directory |
+| `--nodata` | False | Dry run — generate scripts only, don't copy files |
+| `-v` / `--verbose` | False | Print more detail during setup |
 
-### Notes
-Clean up and Zip of each client's set of output files and alignments is performed separately after the pipeline has completed.
+Example with basecaller override:
+```bash
+python3 amplicon_prep_gadi.py \
+  -s samplesheet.csv \
+  -p amplicon_run_20260218 \
+  -e your.email@anu.edu.au \
+  --basecaller_cfg dna_r10.4.1_e8.2_400bps_sup@v5.0.0 \
+  ONT_PlasmidSeq_20260218/plasmidpool/20260218_1629_3F_PBE83525_e4822fd3
+```
+
+---
+
+## Troubleshooting
+
+**`curl: (7) Failed to connect to www.nextflow.io`**
+The system `nextflow` module tries to download from the internet on compute nodes. Make sure you are using the local binary at `/g/data/vz35/amplicon_gadi/nextflow` and not loading the `nextflow` module.
+
+**`Cannot find epi2me-labs/wf-amplicon`**
+The pipeline cache was not found. Re-run `nextflow pull epi2me-labs/wf-amplicon -r v1.2.2` on the login node with `NXF_HOME=/g/data/vz35/amplicon_gadi` set.
+
+**`Failed to pull singularity image ... network is unreachable`**
+A Singularity container is missing from the cache. Pull it manually on the login node (see Prerequisites step 3).
+
+**Job name in error files hard to read**
+PBS error files are named `ampln_asm_<ClientName>.e<jobid>` — the client name is included automatically.
