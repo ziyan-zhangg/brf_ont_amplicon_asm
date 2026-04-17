@@ -1,8 +1,8 @@
-$VER = "v2.02"
+$VER = "v2.03"
 $DATE = "Date: {0}" -f (Get-Date)
 
 $COMMENT = @"
-* New: A draft README added.
+* New: CLean up folder available only at Gadi.
 "@
 
 Move-Item -Path "changelog.txt" -Destination "changelog_old.txt"
