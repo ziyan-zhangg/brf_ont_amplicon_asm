@@ -1,3 +1,8 @@
+v2.06
+Date: 2026-04-17
+* Fix: now prep script will look into fastq_pass and fastq_fail folders for fastq files, instead of looking into the root folder. 
+  This is to accomodate the strict filtering applied for plasmid.
+
 v2.05
 Date: 2026-04-17
 * New: Just a polish for tag and push script

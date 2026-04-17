@@ -242,7 +242,7 @@ def get_barcode_dirs(p: Path, all_barcodes: set, chosen_dirs: list) -> list:
     """
     dirs = [x for x in p.iterdir() if x.is_dir()]
     for d in dirs:
-        if d.name == 'fastq_pass':
+        if d.name in ('fastq_pass', 'fastq_fail'):
             bc_dirs = [x for x in d.iterdir() if x.is_dir() if x.name in all_barcodes]
             if bc_dirs:
                 chosen_dirs.extend(bc_dirs)
@@ -259,7 +259,7 @@ def parse_input_dirs(prom_dir: str, client_sheet: dict) -> dict:
                 -> fastq_pass/
                     -> barcode21/ (fastqs)
     Should be able to find everything listed in client_sheet
-    returns a dict source_dirs[client] = {barcode:path_to_barcode_dir}}
+    returns a dict source_dirs[client] = {barcode:[list of barcode dirs from fastq_pass and/or fastq_fail]}
     """
     pdp = Path(prom_dir)
     if not pdp.exists():
@@ -274,11 +274,13 @@ def parse_input_dirs(prom_dir: str, client_sheet: dict) -> dict:
     for client in client_sheet:
         source_dirs[client] = {}
         for barcode in client_sheet[client]:
-            source_dirs[client][barcode] = ''  # src dirname
+            source_dirs[client][barcode] = []  # list of src dirs (pass + fail)
             all_barcodes.add(barcode)
 
     barcode_dirs = get_barcode_dirs(pdp, all_barcodes, [])
-    bcds = {bcd.name:bcd for bcd in barcode_dirs}
+    bcds = {}
+    for bcd in barcode_dirs:
+        bcds.setdefault(bcd.name, []).append(bcd)
     bcd_names = set(bcds.keys())
     if all_barcodes.difference(bcd_names):
         print(f"Barcodes not found {all_barcodes.difference(bcd_names)}")
@@ -331,7 +333,8 @@ def create_new_structure(plasmid_dir: Path, client_sheet: dict, source_dirs: dic
                 bp = p/barcode
                 if not bp.exists():
                     bp.mkdir()
-                fps = [source_dirs[client][barcode]/f for f in os.listdir(source_dirs[client][barcode])]
+                fps = [src_dir/f for src_dir in source_dirs[client][barcode]
+                       for f in os.listdir(src_dir) if check_fastq_name(f)]
                 if collapse:
                     collapse_fp = plasmid_dir/client/barcode/f'{barcode}.fq.gz'
                     if not nodata:
@@ -356,7 +359,8 @@ def create_new_structure(plasmid_dir: Path, client_sheet: dict, source_dirs: dic
                         if verbose:
                             print(f'Copying {fp} to {plasmid_dir/client/barcode}')
                         if not nodata:
-                            copy2(fp, plasmid_dir/client/barcode/fp.name)
+                            dest_name = f'{fp.parent.parent.name}_{fp.name}'
+                            copy2(fp, plasmid_dir/client/barcode/dest_name)
 
                 ref = client_sheet[client][barcode]['ref']
                 if ref:

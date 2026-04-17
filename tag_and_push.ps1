@@ -12,7 +12,8 @@ $VER = $NEW_VER
 $DATE = "Date: {0}" -f (Get-Date -Format "yyyy-MM-dd")
 
 $COMMENT = @"
-* New: Just a polish for tag and push script
+* Fix: now prep script will look into fastq_pass and fastq_fail folders for fastq files, instead of looking into the root folder. 
+  This is to accomodate the strict filtering applied for plasmid.
 "@
 
 Write-Host "Using version: $VER"
