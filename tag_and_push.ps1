@@ -1,10 +1,23 @@
-$VER = "v2.03"
-$DATE = "Date: {0}" -f (Get-Date)
+# --- Determine next version tag ---
+$LAST_TAG = git tag --list "v*" | Sort-Object { [Version]($_.TrimStart('v')) } | Select-Object -Last 1
+
+if ($LAST_TAG) {
+    $VER_NUM = [Version]($LAST_TAG.TrimStart("v"))
+    $NEW_VER = "v{0}.{1:00}" -f $VER_NUM.Major, ($VER_NUM.Minor + 1)
+} else {
+    $NEW_VER = "v1.00"
+}
+
+$VER = $NEW_VER
+$DATE = "Date: {0}" -f (Get-Date -Format "yyyy-MM-dd")
 
 $COMMENT = @"
-* New: CLean up folder available only at Gadi.
+* New: Just a polish for tag and push script
 "@
 
+Write-Host "Using version: $VER"
+
+# --- Update changelog ---
 Move-Item -Path "changelog.txt" -Destination "changelog_old.txt"
 Set-Content -Path "changelog.txt" -Value $VER
 Add-Content -Path "changelog.txt" -Value $DATE
@@ -13,10 +26,10 @@ Add-Content -Path "changelog.txt" -Value ""
 Get-Content -Path "changelog_old.txt" | Add-Content -Path "changelog.txt"
 Remove-Item -Path "changelog_old.txt"
 
-git add .                        # Changed from -u to catch new files too
-$MSG = $COMMENT
-git commit -m $MSG
-git tag -a $VER -m $MSG
+# --- Git operations ---
+git add .
+git commit -m $COMMENT
+git tag -a $VER -m $COMMENT
 
-git push -u origin main          # -u sets upstream tracking on first push
-git push origin $VER             # Push the tag
+git push -u origin main
+git push origin $VER
