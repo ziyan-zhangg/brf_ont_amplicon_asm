@@ -1,4 +1,8 @@
 v2.02
+Date: 17/04/2026 1:36:15 PM
+* New: A draft README added.
+
+v2.02
 Date: 14/04/2026 4:12:07 PM
 * New: A draft README added.
 
