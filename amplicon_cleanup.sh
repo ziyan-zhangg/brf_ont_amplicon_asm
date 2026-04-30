@@ -109,10 +109,10 @@ shopt -u nullglob
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 2 — Remove run_* scripts and ampln_asm_cilent_name scheduler logs
+# Step 2 — Remove run_* scripts and ampln_asm_<client_name> scheduler logs
 #           from inside the run folder
 # ---------------------------------------------------------------------------
-echo "[2/4] Removing run_* scripts and ampln_asm_cilent_name logs from ${RUN_DIR}..."
+echo "[2/4] Removing run_* scripts and ampln_asm_<client_name> logs from ${RUN_DIR}..."
 
 shopt -s nullglob
 
@@ -127,16 +127,24 @@ else
     echo "  No run_* scripts found."
 fi
 
-# scheduler logs for ampln_asm_cilent_name
-asm_logs=("${RUN_DIR}/ampln_asm_cilent_name.e"* "${RUN_DIR}/ampln_asm_cilent_name.o"*)
-if [[ ${#asm_logs[@]} -gt 0 ]]; then
-    for f in "${asm_logs[@]}"; do
-        log_action "Removing: $f"
-        run rm -f "$f"
-    done
-else
-    echo "  No ampln_asm_cilent_name.e* / ampln_asm_cilent_name.o* files found."
-fi
+# scheduler logs for each client: ampln_asm_<client_name>.e* / .o*
+for client_dir in "${RUN_DIR}"/*/; do
+    [[ -d "$client_dir" ]] || continue
+    client_name="$(basename "$client_dir")"
+    # Strip date prefix if folder was already renamed (e.g. 20260416_ClientA -> ClientA)
+    if [[ "$client_name" == "${DATE_INDEX}_"* ]]; then
+        client_name="${client_name#${DATE_INDEX}_}"
+    fi
+    asm_logs=("${RUN_DIR}/ampln_asm_${client_name}.e"* "${RUN_DIR}/ampln_asm_${client_name}.o"*)
+    if [[ ${#asm_logs[@]} -gt 0 ]]; then
+        for f in "${asm_logs[@]}"; do
+            log_action "Removing: $f"
+            run rm -f "$f"
+        done
+    else
+        echo "  No ampln_asm_${client_name}.e* / ampln_asm_${client_name}.o* files found."
+    fi
+done
 
 shopt -u nullglob
 echo ""
