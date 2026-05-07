@@ -1,3 +1,6 @@
+Date: 2026-05-07
+* Fix: reconstruct working directory containing referenc with correct version number.
+
 v2.09
 Date: 2026-05-07
 * Fix: reconstruct working directory containing reference.
