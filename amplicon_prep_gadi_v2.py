@@ -189,7 +189,7 @@ def rename_fastq_to_bam(fp: str) -> Path|None:
 def parse_samplesheet(samplesheet: str) -> dict:
     """
     Reads an ONT wf-amplicon sample sheet: e.g.
-    client,alias,barcode,reference
+    client,alias,barcode,ref
     A,amplicon1,barcode21,/path/to/reference.fa
     A,amplicon2,barcode22,ref.fasta
     B,amplicon3,barcode23,
@@ -217,7 +217,7 @@ def parse_samplesheet(samplesheet: str) -> dict:
             alias = cols[1].strip().replace(' ','_')
             barcode = cols[2].strip()
             ref = ''
-            if len(cols) > 3:  # optional reference in 4th column, ignore later columns
+            if len(cols) > 3:  # optional ref in 4th column, ignore later columns
                 ref = cols[3].strip()
             if client not in client_info:
                 client_info[client] = {}
@@ -379,8 +379,8 @@ def main():
     """
     Generates run scripts for the ONT wf-amplicon pipeline on Gadi.
 
-    Reads a (user provided) amplicon sample sheet of 3 or 4 columns (reference is optional): e.g.
-        client,alias,barcode,reference
+    Reads a (user provided) amplicon sample sheet of 3 or 4 columns (ref is optional): e.g.
+        client,alias,barcode,ref
         A,amplicon1,barcode21,/path/to/reference.fa
         A,amplicon2,barcode22,ref.fasta
         B,amplicon3,barcode23,

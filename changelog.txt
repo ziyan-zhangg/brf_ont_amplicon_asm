@@ -1,3 +1,7 @@
+v2.08
+Date: 2026-05-07
+* Fix: Pipeline now correctly names the 4th column value of the samplesheet as "ref" instead of "reference".
+
 v2.07
 Date: 2026-04-30
 * Fix: A bug in clean up script, now it will correctly remove log files.

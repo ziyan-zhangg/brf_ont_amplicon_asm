@@ -12,7 +12,7 @@ $VER = $NEW_VER
 $DATE = "Date: {0}" -f (Get-Date -Format "yyyy-MM-dd")
 
 $COMMENT = @"
-* Fix: A bug in clean up script, now it will correctly remove log files.
+* Fix: Pipeline now correctly names the 4th column value of the samplesheet as "ref" instead of "reference".
 "@
 
 Write-Host "Using version: $VER"

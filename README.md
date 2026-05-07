@@ -186,3 +186,9 @@ A Singularity container is missing from the cache. Pull it manually on the login
 
 **Job name in error files hard to read**
 PBS error files are named `ampln_asm_<ClientName>.e<jobid>` — the client name is included automatically.
+
+---
+## Known issues
+**Cannot be fixed**
+
+The same run script cannot be executed twice when a part of samples work while others not. This is because Nextflow can find input for [.fastq, .fastq.gz, .fq, .fq.gz] files at different levels.
