@@ -1,3 +1,7 @@
+v2.09
+Date: 2026-05-07
+* Fix: reconstruct working directory containing reference.
+
 v2.08
 Date: 2026-05-07
 * Fix: Pipeline now correctly names the 4th column value of the samplesheet as "ref" instead of "reference".

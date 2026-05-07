@@ -9,10 +9,11 @@ if ($LAST_TAG) {
 }
 
 $VER = $NEW_VER
+$VER = v 3.00
 $DATE = "Date: {0}" -f (Get-Date -Format "yyyy-MM-dd")
 
 $COMMENT = @"
-* Fix: Pipeline now correctly names the 4th column value of the samplesheet as "ref" instead of "reference".
+* Fix: reconstruct working directory containing reference.
 "@
 
 Write-Host "Using version: $VER"
