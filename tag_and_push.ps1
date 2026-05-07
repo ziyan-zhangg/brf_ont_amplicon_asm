@@ -9,7 +9,7 @@ if ($LAST_TAG) {
 }
 
 # $VER = $NEW_VER
-$VER = v 3.00
+$VER = "v3.00"
 $DATE = "Date: {0}" -f (Get-Date -Format "yyyy-MM-dd")
 
 $COMMENT = @"
