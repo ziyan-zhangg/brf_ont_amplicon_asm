@@ -13,7 +13,7 @@ $VER = $NEW_VER
 $DATE = "Date: {0}" -f (Get-Date -Format "yyyy-MM-dd")
 
 $COMMENT = @"
-* Fix small issues and rewrite readme file.
+* Clean up tool now can be used for new amplicon result folders.
 "@
 
 Write-Host "Using version: $VER"

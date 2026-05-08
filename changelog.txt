@@ -1,3 +1,7 @@
+v3.03
+Date: 2026-05-08
+* Clean up tool now can be used for new amplicon result folders.
+
 v3.02
 Date: 2026-05-08
 * Fix small issues and rewrite readme file.
