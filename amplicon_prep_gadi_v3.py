@@ -6,8 +6,19 @@ from shutil import copy2, rmtree
 import gzip
 
 """
-    amplicon_prep_gadi.py v1.3
+    amplicon_prep_gadi.py v1.4
     This script generates run scripts for assembling amplicon data on Gadi.
+
+    v1.4 changes (cleaner per-client layout):
+      - Raw inputs (FASTQ + reference) now live under <client>/raw/<barcode>/
+        instead of <client>/<barcode>/.
+      - All wf-amplicon outputs go to <client>/results/. wf-amplicon then
+        creates one subdir per sample, named by alias -- so the final
+        results tree is flat and human-readable, e.g.
+            <client>/results/YC-BcFUL-pro7-7/
+            <client>/results/WB-BcFUL-pro7-7/
+        No more double-naming (barcode17/YC-BcFUL-pro7-7).
+      - Easy to ship a single client by tar'ing <client>/results/.
 
     v1.3 changes (per-barcode reference handling):
       - wf-amplicon's --reference takes a single FASTA on the CLI, and the
@@ -92,11 +103,14 @@ def generate_per_barcode_ref_scripts(client_info, client_path, pipeline_path,
             continue  # no-ref samples handled separately
 
         alias = sample['alias']
-        # Per-barcode in/out paths, all relative to the top-level amplicon dir
-        # (PBS jobs run there because the top-level script is qsub'd from there).
-        fastq_in = f'{client_name}/{barcode}'
-        out_dn = f'{client_name}/output/{barcode}'
-        ref_path = str(ref_rel)  # already client/barcode/reference/<file>
+        # Input under raw/, output to shared results/. wf-amplicon will create
+        # an alias-named subdir inside --out_dir per --sample, giving us:
+        #   <client>/results/<alias>/...
+        # All paths are relative to the top-level amplicon dir (PBS jobs run
+        # there because the top-level script is qsub'd from there).
+        fastq_in = f'{client_name}/raw/{barcode}'
+        out_dn = f'{client_name}/results'
+        ref_path = str(ref_rel)  # already client/raw/barcode/reference/<file>
 
         script_path = client_path.parent / f'run_{client_name}_{barcode}_ref.qsub'
         job_name = f'ampln_{client_name}_{barcode}'
@@ -138,7 +152,8 @@ def generate_client_noref_script(client_sample_sheet_noref_path, client_path,
     singularity_cache = f'{nxf_base}/singularity_cache'
     nextflow_path = 'nextflow'
     client_name = client_path.name
-    out_dn = f'{client_name}/output'
+    fastq_in = f'{client_name}/raw'
+    out_dn = f'{client_name}/results'
 
     script_path = client_path.parent / f'run_{client_name}_noref.qsub'
     job_name = f'ampln_{client_name}_denovo'
@@ -149,7 +164,7 @@ def generate_client_noref_script(client_sample_sheet_noref_path, client_path,
 
         print(f'# wf-amplicon de-novo consensus: all no-ref samples for {client_name}', file=fout)
         print(f'{nextflow_path} run {pipeline_path} -r {pipeline_version} \\', file=fout)
-        print(f'  --fastq {client_name} \\', file=fout)
+        print(f'  --fastq {fastq_in} \\', file=fout)
         print(f'  --out_dir {out_dn} \\', file=fout)
         print(f'  --sample_sheet ./{client_sample_sheet_noref_path.name} \\', file=fout)
         if basecaller_cfg:
@@ -342,11 +357,14 @@ def create_new_structure(plasmid_dir: Path, client_sheet: dict, source_dirs: dic
 
     amplicon_run_20241217/
         -> clientA/
-            -> barcode01/ (fastqs)
-                -> reference/ (fasta)  optional
-            -> barcode02/ (fastqs)
+            -> raw/
+                -> barcode01/ (fastqs)
+                    -> reference/ (fasta)  optional
+                -> barcode02/ (fastqs)
+            (results/ is created later by wf-amplicon)
         -> clientB/
-            -> barcode03/ (fastqs)
+            -> raw/
+                -> barcode03/ (fastqs)
 
     By default the new barcode directories contain only the collapsed FASTQ file.
     """
@@ -356,14 +374,17 @@ def create_new_structure(plasmid_dir: Path, client_sheet: dict, source_dirs: dic
         p = plasmid_dir / client
         if not p.exists():
             p.mkdir()
+        raw_p = p / 'raw'
+        if not raw_p.exists():
+            raw_p.mkdir()
         for barcode in client_sheet[client]:
-            bp = p / barcode
+            bp = raw_p / barcode
             if not bp.exists():
                 bp.mkdir()
             fps = [src_dir / f for src_dir in source_dirs[client][barcode]
                    for f in os.listdir(src_dir) if check_fastq_name(f)]
             if collapse:
-                collapse_fp = plasmid_dir / client / barcode / f'{barcode}.fq.gz'
+                collapse_fp = bp / f'{barcode}.fq.gz'
                 if not nodata:
                     with gzip.open(collapse_fp, 'wt') as fout:
                         for fp in fps:
@@ -384,10 +405,10 @@ def create_new_structure(plasmid_dir: Path, client_sheet: dict, source_dirs: dic
             else:
                 for fp in fps:
                     if verbose:
-                        print(f'Copying {fp} to {plasmid_dir / client / barcode}')
+                        print(f'Copying {fp} to {bp}')
                     if not nodata:
                         dest_name = f'{fp.parent.parent.name}_{fp.name}'
-                        copy2(fp, plasmid_dir / client / barcode / dest_name)
+                        copy2(fp, bp / dest_name)
 
             ref = client_sheet[client][barcode]['ref']
             if ref:
@@ -419,11 +440,18 @@ def main():
     And creates the required directory structure and scripts:
         amplicon_run_20241217/
             -> clientA/
-                -> barcode01/ (fastqs)
-                    -> reference/ (fasta)  optional
-                -> barcode02/ (fastqs)
+                -> raw/
+                    -> barcode01/ (fastqs)
+                        -> reference/ (fasta)  optional
+                    -> barcode02/ (fastqs)
+                -> results/                       (created by wf-amplicon)
+                    -> <alias1>/ ...
+                    -> <alias2>/ ...
             -> clientB/
-                -> barcode03/ (fastqs)
+                -> raw/
+                    -> barcode03/ (fastqs)
+                -> results/
+                    -> <alias3>/ ...
             -> run_clientA_barcode01_ref.qsub      (variant calling, 1 sample)
             -> run_clientA_noref.qsub              (de-novo, all no-ref samples)
             -> run_clientB_noref.qsub
@@ -486,7 +514,8 @@ def main():
     for client in client_sheet:
         cdir = amplicon_dir / client
         client_info[cdir.name] = {}
-        sample_dirs = [d for d in cdir.glob('*') if d.is_dir() and str(d.name).startswith('barcode')]
+        raw_dir = cdir / 'raw'
+        sample_dirs = [d for d in raw_dir.glob('*') if d.is_dir() and str(d.name).startswith('barcode')] if raw_dir.exists() else []
         if not sample_dirs:
             print(f'Skipping client {cdir}, no sample directories found')
             continue
@@ -523,7 +552,7 @@ def main():
             # Path stored relative to amplicon_dir so PBS scripts (which run in
             # amplicon_dir thanks to `-l wd`) can resolve it directly.
             client_info[cdir.name][barcode]['reference'] = (
-                Path(cdir.name) / barcode / 'reference' / ref_fps[0].name
+                Path(cdir.name) / 'raw' / barcode / 'reference' / ref_fps[0].name
             )
 
         # Per-barcode ref jobs (one PBS script each)

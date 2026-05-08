@@ -8,12 +8,12 @@ if ($LAST_TAG) {
     $NEW_VER = "v1.00"
 }
 
-# $VER = $NEW_VER
-$VER = "v3.00"
+$VER = $NEW_VER
+
 $DATE = "Date: {0}" -f (Get-Date -Format "yyyy-MM-dd")
 
 $COMMENT = @"
-* Fix: reconstruct working directory containing referenc with correct version number.
+* Update: Reconstruct the per client folder structure to be more intuitive and easier to navigate.
 "@
 
 Write-Host "Using version: $VER"

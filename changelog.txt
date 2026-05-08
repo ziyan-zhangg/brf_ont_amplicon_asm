@@ -1,3 +1,7 @@
+v3.01
+Date: 2026-05-08
+* Update: Reconstruct the per client folder structure to be more intuitive and easier to navigate.
+
 v3.00
 Date: 2026-05-07
 * Fix: reconstruct working directory containing referenc with correct version number.
