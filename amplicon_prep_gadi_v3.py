@@ -6,8 +6,21 @@ from shutil import copy2, rmtree
 import gzip
 
 """
-    amplicon_prep_gadi.py v1.4
+    amplicon_prep_gadi.py v1.5
     This script generates run scripts for assembling amplicon data on Gadi.
+
+    v1.5 changes (per-sample reports, no clobbering):
+      - Each per-barcode ref job now writes to its own staging dir
+        <client>/results/.staging_<alias>/ to avoid races on the top-level
+        report/reference/params files that wf-amplicon writes per
+        invocation. After the Nextflow run completes, the script hoists
+        the contents up one level to <client>/results/<alias>/ and removes
+        the empty staging wrapper. Final result is the clean tree:
+            <client>/results/<alias>/{alignments, consensus, variants,
+                                      wf-amplicon-report.html, ...}
+        with one report per sample, none overwritten.
+      - No-ref jobs are unchanged; they run as a single Nextflow invocation
+        per client, so there's nothing to race against.
 
     v1.4 changes (cleaner per-client layout):
       - Raw inputs (FASTQ + reference) now live under <client>/raw/<barcode>/
@@ -103,13 +116,16 @@ def generate_per_barcode_ref_scripts(client_info, client_path, pipeline_path,
             continue  # no-ref samples handled separately
 
         alias = sample['alias']
-        # Input under raw/, output to shared results/. wf-amplicon will create
-        # an alias-named subdir inside --out_dir per --sample, giving us:
-        #   <client>/results/<alias>/...
+        # Each ref job writes to its own staging dir to avoid races on the
+        # top-level wf-amplicon-report.html / reference / params files (which
+        # the workflow writes per invocation, not per sample). After Nextflow
+        # finishes, we hoist the alias subdir's contents up to
+        # <client>/results/<alias>/ and remove the staging wrapper.
         # All paths are relative to the top-level amplicon dir (PBS jobs run
         # there because the top-level script is qsub'd from there).
         fastq_in = f'{client_name}/raw/{barcode}'
-        out_dn = f'{client_name}/results'
+        staging_dn = f'{client_name}/results/.staging_{alias}'
+        final_dn = f'{client_name}/results/{alias}'
         ref_path = str(ref_rel)  # already client/raw/barcode/reference/<file>
 
         script_path = client_path.parent / f'run_{client_name}_{barcode}_ref.qsub'
@@ -119,16 +135,37 @@ def generate_per_barcode_ref_scripts(client_info, client_path, pipeline_path,
             _write_pbs_header(fout, job_name, email)
             _write_nxf_env(fout, nxf_base, singularity_cache)
 
+            print('set -euo pipefail', file=fout)
+            print('', file=fout)
+
             print(f'# wf-amplicon variant calling: {client_name}/{barcode} ({alias})', file=fout)
             print(f'{nextflow_path} run {pipeline_path} -r {pipeline_version} \\', file=fout)
             print(f'  --fastq {fastq_in} \\', file=fout)
             print(f'  --reference {ref_path} \\', file=fout)
             print(f'  --sample {alias} \\', file=fout)
-            print(f'  --out_dir {out_dn} \\', file=fout)
+            print(f'  --out_dir {staging_dn} \\', file=fout)
             if basecaller_cfg:
                 print(f'  --override_basecaller_cfg {basecaller_cfg} \\', file=fout)
             print(f'  -profile singularity \\', file=fout)
             print(f'  -offline', file=fout)
+            print('', file=fout)
+
+            # Hoist staging/<alias>/* and the top-level report/reference/params
+            # files up to <client>/results/<alias>/, then drop the staging dir.
+            print(f'# Hoist results out of staging into final per-sample dir', file=fout)
+            print(f'mkdir -p {final_dn}', file=fout)
+            # Move wf-amplicon's per-sample subdir contents (alignments, etc.)
+            print(f'if [ -d {staging_dn}/{alias} ]; then', file=fout)
+            print(f'  mv {staging_dn}/{alias}/* {final_dn}/', file=fout)
+            print(f'  rmdir {staging_dn}/{alias}', file=fout)
+            print(f'fi', file=fout)
+            # Move top-level files (report, reference, params, versions, execution/)
+            print(f'shopt -s dotglob nullglob', file=fout)
+            print(f'for f in {staging_dn}/*; do', file=fout)
+            print(f'  mv "$f" {final_dn}/', file=fout)
+            print(f'done', file=fout)
+            print(f'shopt -u dotglob nullglob', file=fout)
+            print(f'rmdir {staging_dn}', file=fout)
             print('', file=fout)
 
         os.chmod(script_path, 0o755)

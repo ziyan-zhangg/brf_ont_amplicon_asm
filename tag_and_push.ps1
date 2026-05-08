@@ -13,7 +13,7 @@ $VER = $NEW_VER
 $DATE = "Date: {0}" -f (Get-Date -Format "yyyy-MM-dd")
 
 $COMMENT = @"
-* Update: Reconstruct the per client folder structure to be more intuitive and easier to navigate.
+* Fix small issues and rewrite readme file.
 "@
 
 Write-Host "Using version: $VER"

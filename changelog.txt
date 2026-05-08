@@ -1,3 +1,7 @@
+v3.02
+Date: 2026-05-08
+* Fix small issues and rewrite readme file.
+
 v3.01
 Date: 2026-05-08
 * Update: Reconstruct the per client folder structure to be more intuitive and easier to navigate.

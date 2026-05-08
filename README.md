@@ -1,194 +1,161 @@
-# ONT Amplicon Assembly Pipeline on Gadi
+# amplicon_prep_gadi
 
-This toolkit prepares and submits ONT amplicon assembly jobs on the NCI Gadi HPC system using the [epi2me-labs/wf-amplicon](https://github.com/epi2me-labs/wf-amplicon) Nextflow pipeline.
+A Python script that takes a PromethION sequencing run and a sample sheet, then generates everything needed to run [`epi2me-labs/wf-amplicon`](https://github.com/epi2me-labs/wf-amplicon) on Gadi (NCI's HPC). Designed for a sequencing-facility workflow where one run contains samples from multiple clients, with a mix of variant-calling (reference provided) and de-novo (no reference) samples.
 
----
+## What it does
 
-## Files
+Given a PromethION output directory and a CSV sample sheet, the script:
 
-| File | Description |
-|---|---|
-| `amplicon_prep_gadi.py` | Main Python script that generates all PBS job scripts and directory structure |
-| `amplicon_setup.qsub` | PBS launcher script that runs `amplicon_prep_gadi.py` on Gadi |
+1. Builds a clean per-client directory tree on Gadi.
+2. Collapses each barcode's `fastq_pass` (and `fastq_fail`) FASTQ files into a single `<barcode>.fq.gz`. This is because sequences generated from Rapid Prep is usually shorter.
+3. Copies the reference FASTA into each ref-having barcode's folder.
+4. Generates one PBS job script per ref sample (variant calling mode).
+5. Generates one PBS job script per client for all that client's no-ref samples (de-novo mode).
+6. Generates a top-level `run_amplicons.sh` that `qsub`s all jobs at once.
 
----
+## Two assembly modes
 
-## Prerequisites
+`wf-amplicon` runs in one of two modes, decided per sample by whether a reference was provided in the sample sheet.
 
-### One-time setup (login node only)
+### Variant calling mode (reference provided)
 
-These steps only need to be done once. Gadi compute nodes have no internet access, so all tools and containers must be pre-cached.
+Used when the client supplies a reference FASTA for a barcode. The workflow aligns reads against that reference using minimap2, then calls variants with Medaka and produces a consensus.
 
-**1. Install Nextflow binary**
-```bash
-module load java/jdk-17.0.2
-cd /g/data/vz35/amplicon_gadi
-curl https://get.nextflow.io | bash
-```
+Each ref sample is run as its **own independent Nextflow invocation** — one PBS job per barcode. This is necessary because `wf-amplicon` takes a single `--reference` FASTA on the command line, and we want each barcode aligned only against its own reference, not a pooled FASTA shared across clients.
 
-**2. Set environment and pull the pipeline**
-```bash
-module load java/jdk-17.0.2
-export PATH=/g/data/vz35/amplicon_gadi:$PATH
-export NXF_HOME=/g/data/vz35/amplicon_gadi
-export NXF_VER=23.10.1
-export NXF_DISABLE_CHECK_LATEST=true
-export SINGULARITY_CACHEDIR=/g/data/vz35/amplicon_gadi/singularity_cache
-export NXF_SINGULARITY_CACHEDIR=$SINGULARITY_CACHEDIR
+Outputs per ref sample include:
+- `alignments/` — sorted BAM + index against the (sanitized) reference
+- `variants/` — Medaka-annotated VCF
+- `consensus/` — Medaka consensus FASTA
+- `reference_sanitized_seqIDs.fasta` — the reference with whitespace-safe IDs
+- `wf-amplicon-report.html` — interactive QC + variant report for this sample
+- `params.json`, `versions.txt`, `execution/` — provenance
 
-nextflow pull epi2me-labs/wf-amplicon -r v1.2.2
-```
+### De-novo assembly mode (no reference)
 
-**3. Pre-pull Singularity containers**
+Used when the sample sheet leaves the reference column blank. The workflow filters reads by length/quality, then runs miniasm to produce a draft assembly, polishes with Medaka, and reports back QC.
 
-Run the pipeline once on the login node (it will fail due to memory limits but will cache the containers):
-```bash
-module load singularity
-nextflow run epi2me-labs/wf-amplicon -r v1.2.2 \
-  --fastq <your_fastq_dir> \
-  --out_dir <output_dir> \
-  --sample_sheet <sample_sheet.csv> \
-  -profile singularity
-```
+All of one client's no-ref samples are run together in a **single Nextflow invocation** driven by a per-client sample sheet. This is fine because no-ref jobs don't compete for any per-invocation output files — they coexist cleanly under one `--out_dir`.
 
-Any containers not pulled automatically can be pulled manually:
-```bash
-singularity pull \
-  --name ontresearch-medaka-sha<hash>.img \
-  docker://ontresearch/medaka:sha<hash>
+Outputs per no-ref sample include:
+- `consensus/` — polished de-novo assembly per sample
+- A single client-level `wf-amplicon-report.html` covering all that client's de-novo samples
 
-# Move to cache directory
-mv ontresearch-medaka-sha<hash>.img /g/data/vz35/amplicon_gadi/singularity_cache/
-```
+### Index
+**Variant Calling Options**: min_coverage = 20 (Only variants covered by more than this number of reads are reported in the resulting VCF file.)
 
----
+**De-novo Consensus Options**: average coverage > 150X. Usually 1500 reads per amplicon should thus be enough in the vast majority of cases.
 
-## Input: Sample Sheet
 
-A CSV file with 3 or 4 columns (reference is optional):
+
+## Output directory layout
+
+For a run containing a client called `Client`:
 
 ```
-client,alias,barcode,reference
-Sarah_Kaines,SK48,barcode44,
-Sarah_Kaines,SK49,barcode45,
-AnotherClient,AC01,barcode01,/path/to/reference.fa
+amplicon_run_YYYYMMDD/
+├── Client/
+│   ├── raw/
+│   │   ├── barcode17/
+│   │   │   ├── barcode17.fq.gz
+│   │   │   └── reference/
+│   │   │       └── BcFUL_YC_pro77.fasta
+│   │   ├── barcode18/
+│   │   │   └── ...
+│   │   └── barcode29/
+│   └── results/
+│       ├── YC-BcFUL-pro7-7/        ← named by alias, not barcode
+│       │   ├── alignments/
+│       │   ├── consensus/
+│       │   ├── variants/
+│       │   ├── execution/
+│       │   ├── reference_sanitized_seqIDs.fasta
+│       │   ├── params.json
+│       │   ├── versions.txt
+│       │   └── wf-amplicon-report.html
+│       ├── WB-BcFUL-pro7-7/
+│       │   └── ...
+│       └── ...
+├── Client_sample_sheet_noref.csv     (only if client has no-ref samples)
+├── run_Client_barcode17_ref.qsub     (one per ref barcode)
+├── run_Client_barcode18_ref.qsub
+├── ...
+├── run_Client_noref.qsub             (one per client, if applicable)
+└── run_amplicons.sh                        (qsubs every job above)
 ```
 
-| Column | Description |
-|---|---|
-| `client` | Client/project name — sets the output directory name |
-| `alias` | Sample alias used in output filenames (e.g. SK48) |
-| `barcode` | Barcode directory name in the PromethION data |
-| `reference` | Optional path to a reference FASTA file |
-
-Samples with a reference and samples without are handled separately — two sample sheets are generated automatically.
-
----
+Inputs live under `<client>/raw/`, results under `<client>/results/`. To deliver a client their data, `tar czf <client>_results.tar.gz <client>/results` is enough — one report per sample, no clobbering, no internal barcode IDs to confuse them.
 
 ## Usage
 
-### Step 1: Edit the launcher script
-
-Open `amplicon_setup.qsub` and set the variables at the top:
-
 ```bash
-Email="your.email@anu.edu.au"
-PromData="ONT_PlasmidSeq_20260218/plasmidpool/20260218_1629_3F_PBE83525_e4822fd3"
-AmpDir="amplicon_run_20260218"
-SampleSheet="ONT_PlasmidSeq_20260218/plasmid_samplesheet_20260218.csv"
+python3 amplicon_prep_gadi.py <prom_dir> -s <samplesheet.csv> -e <email> [options]
 ```
 
-### Step 2: Submit the launcher
+### Required arguments
 
-```bash
-cd /path/to/your/working/directory
-qsub amplicon_setup.qsub
+- `prom_dir` — path to the PromethION run directory (the script walks it looking for `fastq_pass/` and `fastq_fail/` folders containing barcoded reads)
+- `-s, --samplesheet` — path to the CSV sample sheet (see format below)
+- `-e, --email` — email address for PBS notifications
+
+### Common options
+
+- `-p, --amplicon_dir` — name of the output directory (defaults to `amplicon_run_<YYYYMMDD>`)
+- `-o, --overwrite` — wipe the output directory if it already exists
+- `-v, --verbose` — print details of FASTQ collapsing and reference resolution
+- `--pipeline_version` — `wf-amplicon` version (default `v1.2.2`)
+- `--basecaller_cfg` — override basecaller config string, e.g. `dna_r10.4.1_e8.2_400bps_sup@v5.0.0`
+- `--no_collapse` — keep individual FASTQ files instead of merging into one per barcode
+- `--nodata` — generate the directory structure and PBS scripts without copying any data (useful for dry runs)
+
+## Sample sheet format
+
+A CSV with 3 or 4 columns, header optional:
+
+```csv
+client,alias,barcode,ref
+Client,YC-BcFUL-pro7-7,barcode17,/path/to/BcFUL_YC_pro77.fasta
+Client,WB-BcFUL-pro7-7,barcode18,/path/to/BcFUL_WB_pro77.fasta
+Client,unknown_amplicon_3,barcode23,
+Other_Client,plasmid_X,barcode01,
 ```
 
-This runs `amplicon_prep_gadi.py` which will:
-1. Scan the PromethION directory for the barcodes listed in the sample sheet
-2. Create a structured output directory under `AmpDir/`
-3. Collapse all FASTQ files per barcode into a single `.fq.gz` file
-4. Generate per-client sample sheets (with and without reference)
-5. Generate per-client PBS job scripts (`run_<client>.qsub`)
-6. Generate a top-level launcher script (`run_amplicons.sh`)
+Column meanings:
 
-### Step 3: Submit the assembly jobs
+- **client** — directory name on disk for this client's data. Spaces become underscores.
+- **alias** — human-readable sample name. Used in reports, output paths, and BAM headers. Must be unique per client.
+- **barcode** — ONT barcode folder name (`barcode01`, `barcode02`, ... `barcode96`).
+- **ref** — path to a reference FASTA. Leave blank for de-novo mode. Path can be absolute or relative to where you run the script.
+
+The same client can have a mix of ref and no-ref rows; each is routed to the appropriate mode.
+
+## Reference file
+Reference file need to be a fasta file. If more than one reference need to be assigned to one barcoded sample. Concatenate them as wf-amplicon natively reads them all.
 
 ```bash
-cd <AmpDir>
+awk 'FNR==1 && NR!=1 {print ""} {print}' ref1.fasta ref2.fasta ref3.fasta > concatenated_refs.fasta
+```
+
+
+## Running the jobs
+
+After the script finishes:
+
+```bash
+cd amplicon_run_<YYYYMMDD>
 ./run_amplicons.sh
 ```
 
-This submits a PBS job for each client.
+This `qsub`s every PBS script. They run independently on the `biodev` queue:
 
----
+- Each ref job: `mem=8GB, ncpus=4, walltime=2:00:00` (single sample)
+- Each client's no-ref job: `mem=12GB, ncpus=4, walltime=4:00:00` (covers all that client's de-novo samples)
 
-## Output Directory Structure
+Failures are isolated per job, so you can re-`qsub` an individual script to retry a single sample without re-running everything.
 
-```
-AmpDir/
-├── run_amplicons.sh               # Top-level launcher — runs all client jobs
-├── ClientA_sample_sheet_noref.csv
-├── ClientA_sample_sheet_ref.csv
-├── run_ClientA.qsub               # PBS job script for ClientA
-├── ClientA/
-│   ├── barcode01/
-│   │   └── barcode01.fq.gz        # Collapsed FASTQ
-│   ├── barcode02/
-│   │   ├── barcode02.fq.gz
-│   │   └── reference/
-│   │       └── reference.fa
-│   └── output/                    # wf-amplicon results
-│       ├── SK48.final.fasta
-│       └── SK49.final.fasta
-└── ClientB/
-    └── ...
-```
 
----
+## Known limitations
 
-## Advanced Options
-
-These can be passed to `amplicon_prep_gadi.py` directly or added to `amplicon_setup.qsub`:
-
-| Option | Default | Description |
-|---|---|---|
-| `--pipeline_version` | `v1.2.2` | wf-amplicon version to use |
-| `--basecaller_cfg` | None | Override basecaller e.g. `dna_r10.4.1_e8.2_400bps_sup@v5.0.0` |
-| `--no_collapse` | False | Disable collapsing FASTQs into a single file per barcode |
-| `--overwrite` | False | Overwrite existing output directory |
-| `--nodata` | False | Dry run — generate scripts only, don't copy files |
-| `-v` / `--verbose` | False | Print more detail during setup |
-
-Example with basecaller override:
-```bash
-python3 amplicon_prep_gadi.py \
-  -s samplesheet.csv \
-  -p amplicon_run_20260218 \
-  -e your.email@anu.edu.au \
-  --basecaller_cfg dna_r10.4.1_e8.2_400bps_sup@v5.0.0 \
-  ONT_PlasmidSeq_20260218/plasmidpool/20260218_1629_3F_PBE83525_e4822fd3
-```
-
----
-
-## Troubleshooting
-
-**`curl: (7) Failed to connect to www.nextflow.io`**
-The system `nextflow` module tries to download from the internet on compute nodes. Make sure you are using the local binary at `/g/data/vz35/amplicon_gadi/nextflow` and not loading the `nextflow` module.
-
-**`Cannot find epi2me-labs/wf-amplicon`**
-The pipeline cache was not found. Re-run `nextflow pull epi2me-labs/wf-amplicon -r v1.2.2` on the login node with `NXF_HOME=/g/data/vz35/amplicon_gadi` set.
-
-**`Failed to pull singularity image ... network is unreachable`**
-A Singularity container is missing from the cache. Pull it manually on the login node (see Prerequisites step 3).
-
-**Job name in error files hard to read**
-PBS error files are named `ampln_asm_<ClientName>.e<jobid>` — the client name is included automatically.
-
----
-## Known issues
-**Cannot be fixed**
-
-The same run script cannot be executed twice when a part of samples work while others not. This is because Nextflow can find input for [.fastq, .fastq.gz, .fq, .fq.gz] files at different levels.
+- `--nodata` mode skips copying reference FASTAs, so the post-build scan for references will fail if any sample sheet rows have a non-blank `ref`. Use `--nodata` for no-ref-only test runs, or expect the failure to come from `Expected exactly one reference FASTA in ...`.
+- Each ref-having barcode must have **exactly one** FASTA file under its `reference/` directory. The script enforces this and exits if it finds zero or more than one.
+- If you `qstat`-cancel a ref job mid-hoist (a sub-second window), a leftover `.staging_<alias>/` may remain. Just `rm -rf` it and re-`qsub` the script — the script will recreate everything.
